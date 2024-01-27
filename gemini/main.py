@@ -1,6 +1,7 @@
 import sys
 from custome_errors import *
 sys.excepthook = my_excepthook
+import winsound
 import pyperclip
 import gui
 import guiTools
@@ -11,9 +12,40 @@ import PyQt6.QtCore as qt2
 language.init_translation()
 import google.generativeai as genai
 import PIL.Image
-genai.configure(api_key="API")
+genai.configure(api_key="")
 IMGModel = genai.GenerativeModel('gemini-pro-vision')
 TextModel=genai.GenerativeModel('gemini-pro')
+class M(qt2.QObject):
+    finished=qt2.pyqtSignal(str)
+class message (qt2.QRunnable):
+    def __init__(self,choice,data,path=""):
+        super().__init__()
+        self.choice=choice
+        self.data=data
+        self.path=path
+        self.t=M()
+        self.finish=self.t.finished
+    def sendI(self):
+        try:
+            img=PIL.Image.open(self.path)
+            response = IMGModel.generate_content([self.data,img])
+            self.finish.emit(response.text)
+        except:
+            self.finish.emit(_("error"))
+    def sendText(self):
+        try:
+            response = TextModel.generate_content(self.data)
+            self.finish.emit(response.text)
+        except:
+            self.finish.emit(_("error"))
+
+    @qt2.pyqtSlot()
+    def run(self):
+        if self.choice==0:
+            self.sendText()
+        elif self.choice==1:
+            self.sendI()
+
 class main (qt.QMainWindow):
     def __init__(self):
         super().__init__()
@@ -33,13 +65,16 @@ class main (qt.QMainWindow):
         self.browse.setDefault(True)
         self.browse.clicked.connect(self.onbrowse)
         layout2.addWidget(self.browse)
+        self.IMG_ask=qt.QLineEdit()
+        self.IMG_ask.setAccessibleName("ask gemini about this this photo")
+        layout2.addWidget(self.IMG_ask)
         self.convertText=qt.QPushButton(_("send"))
         self.convertText.setDefault(True)
-        self.convertText.clicked.connect(self.sendText)
+        self.convertText.clicked.connect(lambda:self.runThread(0,self.message.text()))
         layout1.addWidget(self.convertText)
         self.sendIMG=qt.QPushButton(_("send"))
         self.sendIMG.setDefault(True)
-        self.sendIMG.clicked.connect(self.sendI)
+        self.sendIMG.clicked.connect(lambda:self.runThread(1,self.IMG_ask.text(),path=self.path.text()))
         layout2.addWidget(self.sendIMG)
         self.result=qt.QTextEdit()
         self.result.setReadOnly(True)
@@ -47,6 +82,7 @@ class main (qt.QMainWindow):
         layout.addWidget(self.result)
         service.add(_("text model"),layout1)
         service.add(_("image model"),layout2)
+        self.Threadpool=qt2.QThreadPool()
         self.setting=qt.QPushButton(_("settings"))
         self.setting.setDefault(True)
         self.setting.clicked.connect(lambda: settings(self).exec())
@@ -54,6 +90,7 @@ class main (qt.QMainWindow):
         w=qt.QWidget()
         w.setLayout(layout)
         self.setCentralWidget(w)
+
 
         mb=self.menuBar()
         help=mb.addMenu(_("help"))
@@ -97,20 +134,18 @@ class main (qt.QMainWindow):
         if file.exec()==qt.QFileDialog.DialogCode.Accepted:
             self.path.setText(file.selectedFiles()[0])
             self.path.setFocus()
-    def sendText(self):
-        try:
-            response = TextModel.generate_content(self.message.text())
-            self.result.setText(response.text)
-        except:
-            self.result.setText(_("error"))
-        self.result.setFocus()
-    def sendI(self):
-        try:
-            img=PIL.Image.open(self.path.text())
-            response = IMGModel.generate_content(img)
-            self.result.setText(response.text)
-        except:
-            self.result.setText(_("error"))
+    def runThread(self,choise,data,path=""):
+        thread=message(choise,data,path=path)
+        thread.t.finished.connect(self.end)
+        self.Threadpool.start(thread)
+        winsound.PlaySound("data/sounds/1.wav",1)
+        self.sendIMG.setDisabled(True)
+        self.convertText.setDisabled(True)
+    def end(self,text):
+        self.result.setText(text)
+        self.sendIMG.setDisabled(False)
+        self.convertText.setDisabled(False)
+        winsound.PlaySound("data/sounds/2.wav",1)
         self.result.setFocus()
 
 App=qt.QApplication([])
